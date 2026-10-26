@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#
+# 5-reset — return to the clean starting state with `make reset`. It keeps the goose fence,
+# the model-key Secret, and the verified skill, and it is safe to run repeatedly.
+set -euo pipefail
+
+# shellcheck source=scripts/lib/common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/lib/common.sh"
+cd "$REPO_ROOT"
+
+hr()  { printf '\n\033[1;36m============================================================\033[0m\n'; }
+say() { printf '\033[1;36m%s\033[0m\n' "$*"; }
+
+say ">> 5-reset: returning to the clean OPEN pre-attack state (make reset)"
+make reset
+
+# Read the status from the live cluster.
+COLL_HITS="$(docker logs "$COLLECTOR_CONTAINER" 2>&1 | grep -c 'aws_access_key_id' || true)"
+
+hr
+say "  READY — run ./2-attack again"
+hr
+printf '   collector exfil hits: %s (expect 0)   baseline fence + Secret + skill kept.\n\n' "$COLL_HITS"

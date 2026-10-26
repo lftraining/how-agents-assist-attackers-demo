@@ -1,0 +1,82 @@
+# agent/goose-job.yaml — the goose agent as a hardened Kubernetes Job. run-task.sh
+# recreates it for every run, and both runs use this same manifest.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: goose-run                         # = GOOSE_JOB_NAME
+  namespace: agent                        # = AGENT_NS
+  labels:
+    app: goose-agent                      # = GOOSE_LABEL
+spec:
+  backoffLimit: 0                         # never retry: a failed run is a result to look at
+  # A time limit that caps cost even if the agent loops. A healthy run takes 30 to 110 seconds.
+  activeDeadlineSeconds: 180
+  ttlSecondsAfterFinished: 1800           # tidy up finished Jobs; run-task also deletes by name
+  template:
+    metadata:
+      labels:
+        app: goose-agent                  # the goose fence selects this label
+    spec:
+      restartPolicy: Never
+      # No Kubernetes API access.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001                  # = GOOSE_UID
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: goose
+          image: goose-sandbox:1.0.0      # = GOOSE_IMAGE (exact version tag, kind-loaded)
+          imagePullPolicy: Never          # kind-loaded; never reach a registry
+          # Run the one recipe without saving a session file.
+          args: ["run", "--recipe", "/recipe/recipe.yaml", "--no-session"]
+          workingDir: /home/goose/project # goose scans <cwd>/.agents/skills for the skill
+          envFrom:
+            # The only way the model key enters the pod.
+            - secretRef:
+                name: model-api-key        # = MODEL_KEY_SECRET
+            # GOOSE_PROVIDER and GOOSE_MODEL for your vendor, written by run-task.sh. No secrets.
+            - configMapRef:
+                name: goose-env
+          env:
+            - name: HOME
+              value: /home/goose
+            - name: GOOSE_DISABLE_KEYRING
+              value: "1"
+            - name: GOOSE_TELEMETRY_ENABLED
+              value: "false"
+            # Never wait for an approval prompt.
+            - name: GOOSE_MODE
+              value: "auto"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - "ALL"
+          resources:
+            requests: { cpu: "250m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "768Mi" }
+          volumeMounts:
+            - name: recipe
+              mountPath: /recipe/recipe.yaml
+              subPath: recipe.yaml
+              readOnly: true
+            # The verified skill, at the path where goose looks for skills.
+            - name: skill
+              mountPath: /home/goose/project/.agents/skills/corewave-sdk-conventions/SKILL.md
+              subPath: SKILL.md
+              readOnly: true
+            # A writable home folder.
+            - name: home
+              mountPath: /home/goose
+      volumes:
+        - name: recipe
+          configMap:
+            name: goose-recipe             # built by run-task.sh from agent/recipe.yaml
+        - name: skill
+          configMap:
+            name: goose-skill              # built by run-task.sh from the VERIFIED install
+        - name: home
+          emptyDir: {}

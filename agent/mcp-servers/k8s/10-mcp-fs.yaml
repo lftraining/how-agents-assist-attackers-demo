@@ -1,0 +1,81 @@
+# mcp-fs — the filesystem MCP server. Only agentgateway connects to it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-fs
+  namespace: demo-agent                 # = DEMO_NS
+  labels:
+    app: mcp-fs                          # = MCP_FS_DEPLOY
+    demo-role: fs                        # = ROLE_LABEL_KEY=ROLE_FS (policy/Falco selector)
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-fs
+  template:
+    metadata:
+      labels:
+        app: mcp-fs
+        demo-role: fs
+    spec:
+      # No Kubernetes API access.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10002
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mcp-fs
+          image: mcp-fs:1.0.0
+          imagePullPolicy: Never         # kind-loaded; never reach a registry
+          env:
+            - name: FS_WORKSPACE
+              value: /workspace          # = FS_WORKSPACE
+            - name: PORT
+              value: "8080"
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # The writable workspace where the agent builds the project.
+            - name: workspace
+              mountPath: /workspace
+            # The decoy credential, mounted read-only as a single file.
+            - name: decoy
+              mountPath: /workspace/.aws/credentials   # = DECOY_CRED_PATH
+              subPath: credentials
+              readOnly: true
+          readinessProbe:
+            tcpSocket: { port: 8080 }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: decoy
+          configMap:
+            name: mcp-fs-decoy           # from 00-mcp-fs-decoy-configmap.yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-fs
+  namespace: demo-agent
+  labels:
+    app: mcp-fs
+spec:
+  selector:
+    app: mcp-fs
+  ports:
+    - name: mcp
+      port: 8080
+      targetPort: 8080

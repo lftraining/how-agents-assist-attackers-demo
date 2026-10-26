@@ -1,0 +1,70 @@
+# mcp-http-post — the HTTP POST MCP server, used as the exfiltration tool. In run two, the
+# gateway removes its tool and Cilium lets the pod reach only DNS.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-http-post
+  namespace: demo-agent
+  labels:
+    app: mcp-http-post                   # = MCP_HTTP_POST_DEPLOY
+    demo-role: http-post                 # = ROLE_HTTP_POST
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-http-post
+  template:
+    metadata:
+      labels:
+        app: mcp-http-post
+        demo-role: http-post
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10002
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mcp-http-post
+          image: mcp-http-post:1.0.0
+          imagePullPolicy: Never
+          env:
+            - name: PORT
+              value: "8080"
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            tcpSocket: { port: 8080 }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-http-post
+  namespace: demo-agent
+  labels:
+    app: mcp-http-post
+spec:
+  selector:
+    app: mcp-http-post
+  ports:
+    - name: mcp
+      port: 8080
+      targetPort: 8080

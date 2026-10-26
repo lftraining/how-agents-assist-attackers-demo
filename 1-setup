@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+#
+# 1-setup — put the demo into its clean starting state (gateway open, collector empty).
+# If everything is ready, it runs `make reset`. Otherwise it runs `make setup` and `make up`,
+# which need MODEL_KEY_FILE exported in your terminal.
+set -euo pipefail
+
+# shellcheck source=scripts/lib/common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/lib/common.sh"
+cd "$REPO_ROOT"
+
+hr()  { printf '\n\033[1;36m============================================================\033[0m\n'; }
+say() { printf '\033[1;36m%s\033[0m\n' "$*"; }
+
+# Report the gateway mode: OPEN or DEFENDED.
+gw_mode() {
+  local data
+  data="$(kc -n "$DEMO_NS" get configmap "$GATEWAY_CONFIGMAP" -o jsonpath='{.data.config\.yaml}' 2>/dev/null)"
+  if printf '%s\n' "$data" | grep -vE '^[[:space:]]*#' | grep -q 'mcpAuthorization:'; then
+    echo "DEFENDED"
+  else
+    echo "OPEN"
+  fi
+}
+
+say ">> 1-setup: preparing the demo environment"
+printf '   NOTE: if the cluster is not up yet this runs `make setup && make up`, which needs\n'
+printf '         MODEL_KEY_FILE exported in THIS terminal. Run 1-setup from your own shell.\n'
+
+# The `if` handles a not-ready result instead of letting `set -e` stop the script.
+if make quick-readiness; then
+  say ">> components READY — returning to the clean OPEN pre-attack state (make reset)"
+  make reset
+else
+  say ">> components NOT ready — bringing the whole environment up (make setup && make up)"
+  make setup
+  make up
+fi
+
+# The quick readiness check skips the model-key Secret, and the agent cannot run without it.
+if ! kc -n "$AGENT_NS" get secret "$MODEL_KEY_SECRET" >/dev/null 2>&1; then
+  say ">> the model-key Secret is missing — creating it (make model-secret)"
+  make model-secret
+fi
+
+# Read the status from the live cluster.
+GW="$(gw_mode)"
+COLL_HITS="$(docker logs "$COLLECTOR_CONTAINER" 2>&1 | grep -c 'aws_access_key_id' || true)"
+
+hr
+say "  ENVIRONMENT READY — run ./2-attack"
+hr
+printf '   cluster: UP   gateway: %s   collector exfil hits: %s (expect 0)\n\n' "$GW" "$COLL_HITS"

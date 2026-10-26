@@ -1,0 +1,105 @@
+# deploy.yaml — agentgateway, goose's only tool endpoint, reachable only inside the cluster.
+# The ConfigMap starts in open mode; apply-policy.sh then writes the config for both modes.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentgateway-config              # = GATEWAY_CONFIGMAP
+  namespace: demo-agent                  # = DEMO_NS
+  labels:
+    app: agentgateway
+data:
+  config.yaml: |
+    # Open mode: the tool servers with no policy. apply-policy.sh replaces this config.
+    mcp:
+      port: 3000
+      targets:
+        - name: filesystem
+          mcp:
+            host: http://mcp-fs.demo-agent.svc.cluster.local:8080/mcp
+        - name: fetch
+          mcp:
+            host: http://mcp-fetch.demo-agent.svc.cluster.local:8080/mcp
+        - name: http-post
+          mcp:
+            host: http://mcp-http-post.demo-agent.svc.cluster.local:8080/mcp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentgateway                      # = GATEWAY_DEPLOY
+  namespace: demo-agent
+  labels:
+    app: agentgateway                     # = GATEWAY_POD_LABEL
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: agentgateway
+  template:
+    metadata:
+      labels:
+        app: agentgateway
+      annotations:
+        # apply-policy.sh sets this to the config's hash.
+        agentgateway.demo/config-hash: "open-bootstrap"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532                  # the image's built-in nonroot user
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agentgateway
+          # Pulled by digest and loaded into the node (GATEWAY_IMAGE_DIGEST in demo.env).
+          image: ghcr.io/agentgateway/agentgateway:v1.6.0
+          imagePullPolicy: Never
+          args: ["-f", "/config/config.yaml"]
+          env:
+            # A writable home and temp folder.
+            - name: HOME
+              value: /tmp
+          ports:
+            - name: mcp
+              containerPort: 3000         # = GATEWAY_CONTAINER_PORT
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            tcpSocket: { port: 3000 }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: 3000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: agentgateway-config
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentgateway                      # = GATEWAY_SERVICE
+  namespace: demo-agent
+  labels:
+    app: agentgateway
+spec:
+  type: ClusterIP                         # no NodePort or hostPort
+  selector:
+    app: agentgateway
+  ports:
+    - name: mcp
+      port: 3000                          # = GATEWAY_SERVICE_PORT
+      targetPort: 3000

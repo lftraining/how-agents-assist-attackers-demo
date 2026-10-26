@@ -1,0 +1,24 @@
+# --- Secrets: never commit ------------------------------------------------------------
+# Your model key and the signing keys live outside the repo. These patterns are a safety net.
+.env
+.env.*
+*.key
+*.pem
+.demo-secrets/
+
+# --- Runtime artifacts -------------------------------------------------------------
+*.log
+# Written when the skill is signed.
+skill-bundle/bundle.digest
+# Rendered configs, the installed skill, and other runtime state.
+.runtime/
+attacker/collector/received/
+
+# --- Local tool state ------------------------------------------------------------
+# Local working notes; never published.
+temp/
+# Your model vendor choice, written by make set-model-key.
+demo.local.env
+__pycache__/
+node_modules/
+.venv/

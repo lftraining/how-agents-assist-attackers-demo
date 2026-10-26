@@ -1,0 +1,17 @@
+# namespaces.yaml — the demo's two namespaces.
+#
+# DEMO_NS: agentgateway and the three MCP servers.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-agent          # = DEMO_NS
+  labels:
+    app.kubernetes.io/part-of: agents-assist-attackers
+---
+# AGENT_NS: goose alone, with the model-key Secret.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agent               # = AGENT_NS
+  labels:
+    app.kubernetes.io/part-of: agents-assist-attackers

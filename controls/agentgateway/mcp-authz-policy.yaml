@@ -1,0 +1,30 @@
+# mcp-authz-policy.yaml — the defended agentgateway config.
+# yaml-language-server: $schema=https://agentgateway.dev/schema/config
+#
+# The three tool servers plus a deny-by-default policy. Open mode loads this same file
+# without the policy block.
+mcp:
+  port: 3000                              # = GATEWAY_CONTAINER_PORT
+  policies:
+    mcpAuthorization:
+      rules:
+        # Allow only the tools the task needs.
+        - allow: |
+            mcp.tool.name == "fetch" ||
+            mcp.tool.name == "read_text_file" ||
+            mcp.tool.name == "list_directory" ||
+            mcp.tool.name == "write_file" ||
+            mcp.tool.name == "create_directory"
+        # Deny the exfiltration tool.
+        - deny: 'mcp.tool.name == "http_post"'
+  targets:
+    # The three MCP servers. tools/list prefixes each tool with its target's name.
+    - name: filesystem
+      mcp:
+        host: http://mcp-fs.demo-agent.svc.cluster.local:8080/mcp
+    - name: fetch
+      mcp:
+        host: http://mcp-fetch.demo-agent.svc.cluster.local:8080/mcp
+    - name: http-post
+      mcp:
+        host: http://mcp-http-post.demo-agent.svc.cluster.local:8080/mcp

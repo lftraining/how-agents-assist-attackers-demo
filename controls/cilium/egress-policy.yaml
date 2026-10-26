@@ -1,0 +1,68 @@
+# egress-policy.yaml — limits where each tool server may connect. `make defend` applies it
+# and `make reset` removes it. It selects the tool-server pods by their demo-role label.
+# scripts/verify-fqdn-policy.sh proves it.
+---
+# mcp-fetch may reach only DNS and the vendor docs host.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: mcp-fetch-egress
+  namespace: demo-agent                  # = DEMO_NS
+spec:
+  endpointSelector:
+    matchLabels:
+      demo-role: fetch                   # = ROLE_FETCH
+  egress:
+    # --- Entry 1: DNS ---------------------------------------------------------------
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system   # = COREDNS_NS
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              # In-cluster service names, at both label depths.
+              - matchPattern: "*.svc.cluster.local"
+              - matchPattern: "*.*.svc.cluster.local"
+              # The one external name mcp-fetch may resolve and connect to.
+              - matchName: "docs.corewave.test"           # = DOCS_HOST
+              # The collector may be looked up but not reached.
+              - matchName: "telemetry.corewave.test"      # = COLLECTOR_HOST
+    # --- Entry 2: the docs host only -------------------------------------------------
+    - toFQDNs:
+        - matchName: "docs.corewave.test"                 # = DOCS_HOST
+      toPorts:
+        - ports:
+            - port: "80"                                  # = DOCS_PORT
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
+---
+# mcp-http-post may reach only DNS.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: mcp-http-post-egress
+  namespace: demo-agent
+spec:
+  endpointSelector:
+    matchLabels:
+      demo-role: http-post               # = ROLE_LABEL_KEY=ROLE_HTTP_POST
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchPattern: "*.svc.cluster.local"
+              - matchPattern: "*.*.svc.cluster.local"
+              - matchName: "telemetry.corewave.test"      # look up only, never reach
+    # No FQDN entry, so every external host is blocked.

@@ -1,0 +1,26 @@
+# dns-probe.yaml — a long-running pod that the readiness check uses to confirm the demo
+# names resolve.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dns-probe
+  namespace: demo-agent
+  labels:
+    app.kubernetes.io/part-of: agents-assist-attackers
+    app.kubernetes.io/component: dns-probe
+spec:
+  restartPolicy: Always
+  terminationGracePeriodSeconds: 0
+  automountServiceAccountToken: false
+  containers:
+    - name: probe
+      # Pre-pulled into the node by cilium-install.sh.
+      image: nicolaka/netshoot:v0.16@sha256:b09d9b21381f47a79b3cbcb30da25266dc17186ea00ae65e99fdc51396f48e70
+      imagePullPolicy: IfNotPresent
+      # Keeps the pod running so the readiness check can exec into it.
+      command: ["sleep", "infinity"]
+      resources:
+        requests: { cpu: 5m, memory: 16Mi }
+        limits: { memory: 64Mi }
+      securityContext:
+        allowPrivilegeEscalation: false

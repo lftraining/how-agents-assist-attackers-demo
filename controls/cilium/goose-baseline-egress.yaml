@@ -1,0 +1,43 @@
+# goose-baseline-egress.yaml — the always-on fence around the goose pod. It may reach only
+# DNS, the gateway, and the model API. `make up` applies it and `make reset` keeps it.
+# scripts/verify-goose-sandbox.sh proves it.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: goose-baseline-egress
+  namespace: agent                       # = AGENT_NS
+spec:
+  endpointSelector:
+    matchLabels:
+      app: goose-agent                   # = GOOSE_LABEL
+  egress:
+    # --- (a) DNS ------------------------------------------------------------------------
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system   # = COREDNS_NS
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchPattern: "*"
+    # --- (b) the agentgateway pods -------------------------------------------------------
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: demo-agent    # = DEMO_NS
+            app: agentgateway                              # = GATEWAY_POD_LABEL
+      toPorts:
+        - ports:
+            - port: "3000"                                 # = GATEWAY_CONTAINER_PORT
+              protocol: TCP
+    # --- (c) the model API, HTTPS only ----------------------------------------------------
+    # A template: scripts/render-config.sh fills in your vendor's API host, and `make up`
+    # applies the copy in .runtime/rendered/.
+    - toFQDNs:
+        - matchName: "__MODEL_API_FQDN__"                  # = MODEL_API_FQDN (rendered)
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

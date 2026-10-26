@@ -1,0 +1,70 @@
+# mcp-fetch — the HTTP GET MCP server. In run two, Cilium lets this pod reach only DNS and
+# the docs host.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-fetch
+  namespace: demo-agent
+  labels:
+    app: mcp-fetch                       # = MCP_FETCH_DEPLOY
+    demo-role: fetch                     # = ROLE_FETCH
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-fetch
+  template:
+    metadata:
+      labels:
+        app: mcp-fetch
+        demo-role: fetch
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10002
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mcp-fetch
+          image: mcp-fetch:1.0.0
+          imagePullPolicy: Never
+          env:
+            - name: PORT
+              value: "8080"
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            tcpSocket: { port: 8080 }
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket: { port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-fetch
+  namespace: demo-agent
+  labels:
+    app: mcp-fetch
+spec:
+  selector:
+    app: mcp-fetch
+  ports:
+    - name: mcp
+      port: 8080
+      targetPort: 8080

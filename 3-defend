@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+#
+# 3-defend — turn the controls on with `make defend` and prove each one, then print a
+# summary. It does not run the agent.
+set -euo pipefail
+
+# shellcheck source=scripts/lib/common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/lib/common.sh"
+cd "$REPO_ROOT"
+
+hr()  { printf '\n\033[1;34m============================================================\033[0m\n'; }
+say() { printf '\033[1;34m%s\033[0m\n' "$*"; }
+
+say ">> 3-defend: applying the controls (make defend)"
+make defend
+
+hr
+say "  DEFENSES ON — what changed:"
+hr
+cat <<EOF
+    * agentgateway  -> DENY-BY-DEFAULT: '${EXFIL_TOOL_NAME}' is removed from tools/list
+                       and a direct call to it is REFUSED (probe above).
+    * Cilium        -> FQDN egress applied: the collector host is denied by omission.
+    * skill supply  -> the installed skill still verifies; the TAMPERED skill is REFUSED
+                       (cosign + ToolHive) and never loads.
+    * run boundary  -> marked in the collector log, so anything after it is run 2.
+
+  Next: ./4-rerun  (same recipe, now contained)
+EOF
+hr

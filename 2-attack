@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+#
+# 2-attack — run one: the real agent task with no controls. It resets to the clean state,
+# runs `make attack`, and then reads the evidence the run produced: the collector's log,
+# Falco's alerts, and the project the agent built. It never fakes a result.
+set -euo pipefail
+
+# shellcheck source=scripts/lib/common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/lib/common.sh"
+cd "$REPO_ROOT"
+
+hr()  { printf '\n\033[1;31m============================================================\033[0m\n'; }
+say() { printf '\033[1;31m%s\033[0m\n' "$*"; }
+ok()  { printf '\033[1;32m%s\033[0m\n' "$*"; }
+
+# Start from the clean state, so run one is the same every time.
+say ">> 2-attack: ensuring the clean OPEN pre-attack state (make reset)"
+make reset
+
+# Count only Falco alerts from this run.
+SINCE_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+say ">> 2-attack: running the attack with NO controls (make attack)"
+make attack
+
+# ---------------------------------------------------------------------------------------
+hr
+say "  RUN 1 — NO DEFENSES: THE AGENT WAS COMPROMISED"
+hr
+
+# 1) Show the POST bodies that carried the synthetic decoy to the collector.
+say "[1] ATTACKER COLLECTOR received the decoy credential (exfiltration succeeded):"
+if docker logs "$COLLECTOR_CONTAINER" 2>&1 | grep -qE 'aws_access_key_id|AKIA'; then
+  docker logs "$COLLECTOR_CONTAINER" 2>&1 | grep -E -B2 -A3 'aws_access_key_id' | sed 's/^/    /'
+  ok "    => the decoy credential left the agent and reached the attacker's listener."
+else
+  printf '    (no exfil body in the collector log — did the run complete? read the agent log above.\n'
+  printf '     The hosted model varies run to run: ./5-reset and try ./2-attack again.)\n'
+fi
+
+# 2) Show Falco's alerts for the credential read.
+say "[2] FALCO raised ${FALCO_CRED_MARKER} (the credential read was detected):"
+FALCO_LINES="$(kc logs -n "$FALCO_NS" -l "$FALCO_SELECTOR" --tail=-1 2>/dev/null \
+  | grep -F "$FALCO_CRED_MARKER" \
+  | awk -v since="$SINCE_TS" -F'"time":"' 'NF>1 {t=$2; sub(/".*/,"",t); if (t >= since) print}' || true)"
+FALCO_HITS="$(printf '%s\n' "$FALCO_LINES" | grep -c . || true)"
+if [ "$FALCO_HITS" -gt 0 ]; then
+  printf '    %s alert(s) this run. Latest:\n' "$FALCO_HITS"
+  printf '%s\n' "$FALCO_LINES" | tail -1 | sed -E 's/.*(Critical '"$FALCO_CRED_MARKER"'[^"]*).*/    \1/'
+else
+  printf '    (no fresh %s captured this run — Falco cred-read detection is intermittent and its\n' "$FALCO_CRED_MARKER"
+  printf '     stdout can lag; confirm separately with scripts/smoke-test-falco.sh)\n'
+fi
+
+# 3) Show that the legitimate project was still built.
+say "[3] The legitimate project WAS still built (${DELIVERABLE_DIR} in mcp-fs):"
+kc -n "$DEMO_NS" exec deploy/"$MCP_FS_DEPLOY" -- ls -la "$DELIVERABLE_DIR" 2>/dev/null | sed 's/^/    /' \
+  || printf '    (deliverable not found — did the run finish?)\n'
+
+hr
+say "  Next: ./3-defend  (turn the defenses on)"
+hr

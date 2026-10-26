@@ -1,0 +1,16 @@
+# kind-config.yaml — the demo's single-node cluster, created by `make up`. No ports are
+# published on your machine.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  ipFamily: ipv4
+  # Cilium replaces kind's default network plugin.
+  disableDefaultCNI: true
+  # Cilium also replaces kube-proxy.
+  kubeProxyMode: none
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+nodes:
+  - role: control-plane
+    # The node image released with kind v0.26.0, pinned by digest.
+    image: kindest/node:v1.32.0@sha256:c48c62eac5da28cdadcf560d1d8616cfa6783b58f0d94cf63ad1bf49600cb027

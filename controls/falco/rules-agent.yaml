@@ -1,0 +1,72 @@
+# rules-agent.yaml — the demo's Falco rules for the MCP tool servers.
+#
+# This is a template: scripts/render-config.sh fills in the vendor docs IP, and Falco loads
+# the copy in .runtime/rendered/. The paths, labels, and markers here must match demo.env.
+
+# The decoy's path inside mcp-fs (DECOY_CRED_PATH).
+- list: agent_decoy_cred_paths
+  items: [/workspace/.aws/credentials]
+
+# The filesystem tool server, in the demo namespace only.
+- macro: agent_workload
+  condition: (container and k8s.ns.name = "demo-agent" and k8s.pod.label[demo-role] = "fs")
+
+# A read of the decoy's path that Falco cannot link to a container.
+- macro: agent_fs_read_unattributed
+  condition: (not container)
+
+- rule: Agent Read Decoy Credentials
+  desc: >
+    A demo MCP filesystem tool server (demo-role=fs) opened the decoy cloud-credentials
+    file for reading — the credential-theft step of the attack, performed by an allowed tool.
+    Fires whether or not Falco could attribute the opening (worker) thread to its container;
+    see the agent_fs_read_unattributed note for why the sentinel path makes that honest.
+  condition: >
+    open_read and
+    fd.name in (agent_decoy_cred_paths) and
+    (agent_workload or agent_fs_read_unattributed)
+  output: >
+    AGENT_CRED_READ decoy credentials read by an agent tool
+    (file=%fd.name proc=%proc.name cmdline=%proc.cmdline pod=%k8s.pod.name
+    ns=%k8s.ns.name container=%container.name image=%container.image.repository)
+  priority: CRITICAL
+  tags: [demo, credentials, mitre_credential_access, T1552.001]
+
+# The two tool servers that make network calls, in the demo namespace only.
+- macro: agent_egress_workload
+  condition: (container and k8s.ns.name = "demo-agent" and k8s.pod.label[demo-role] in ("fetch", "http-post"))
+
+# Any connection attempt, successful or not, except to loopback.
+- macro: agent_tool_connect
+  condition: >
+    (evt.type = connect and
+     (fd.typechar = 4 or fd.typechar = 6) and
+     not evt.arg.addr startswith "127." and
+     not evt.arg.addr startswith "0.0.0.0:")
+
+# The vendor docs host, the only non-DNS destination mcp-fetch may reach.
+- list: agent_fetch_allowed_addrs
+  items: ['"__VENDOR_DOCS_IP__:80"', '"__VENDOR_DOCS_IP__:443"']
+
+# Expected traffic: in-cluster DNS and mcp-fetch to the docs host.
+- macro: agent_expected_egress
+  condition: >
+    ((evt.arg.addr endswith ":53" and evt.arg.addr startswith "10.") or
+     (k8s.pod.label[demo-role] = "fetch" and
+      evt.arg.addr in (agent_fetch_allowed_addrs)))
+
+- rule: Agent Unexpected Outbound Connection
+  desc: >
+    A demo MCP tool server (demo-role fetch or http-post) attempted an outbound
+    connection outside its expected egress (exfiltration / IMDS / lateral movement).
+  condition: >
+    agent_tool_connect and
+    agent_egress_workload and
+    not agent_expected_egress
+  output: >
+    AGENT_EXFIL_ATTEMPT unexpected outbound connection from an agent tool
+    (dest=%evt.arg.addr result=%evt.res proc=%proc.name
+    cmdline=%proc.cmdline pod=%k8s.pod.name role=%k8s.pod.label[demo-role]
+    ns=%k8s.ns.name image=%container.image.repository)
+  priority: CRITICAL
+  tags: [demo, network, mitre_exfiltration, T1041]

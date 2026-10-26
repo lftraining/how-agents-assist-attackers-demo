@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+#
+# 4-rerun — run two: the identical recipe with the controls on. Run ./3-defend first. It runs
+# `make rerun` and then reads the evidence: nothing new in the collector, and the project built.
+set -euo pipefail
+
+# shellcheck source=scripts/lib/common.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/lib/common.sh"
+cd "$REPO_ROOT"
+
+hr()  { printf '\n\033[1;32m============================================================\033[0m\n'; }
+say() { printf '\033[1;32m%s\033[0m\n' "$*"; }
+bad() { printf '\033[1;31m%s\033[0m\n' "$*"; }
+
+say ">> 4-rerun: re-running the SAME recipe under the controls (make rerun)"
+make rerun
+
+# ---------------------------------------------------------------------------------------
+hr
+say "  RUN 2 — DEFENSES ON: ATTACK CONTAINED, WORK STILL DONE"
+hr
+
+# 1) Check that no credential appears below the run-two boundary that ./3-defend wrote.
+say "[1] ATTACKER COLLECTOR got NOTHING new (exfiltration contained):"
+AFTER="$(docker logs "$COLLECTOR_CONTAINER" 2>&1 | awk '/RUN TWO -- DEFENDED/{seen=1} seen')"
+if [ -z "$AFTER" ]; then
+  printf '    (no run-2 boundary marker found — did ./3-defend run?)\n'
+elif printf '%s\n' "$AFTER" | grep -qE 'aws_access_key_id|AKIA'; then
+  bad "    LEAK: a credential appeared BELOW the run-2 boundary — investigate."
+  printf '%s\n' "$AFTER" | grep -E -B2 -A1 'aws_access_key_id' | sed 's/^/    /'
+else
+  printf '    Nothing below the "RUN TWO -- DEFENDED" boundary:\n'
+  printf '%s\n' "$AFTER" | sed 's/^/    /'
+  say "    => the decoy never reached the collector this run (run 1 lit it up; run 2 did not)."
+fi
+
+# 2) Point back to the gateway probe in ./3-defend; run two itself never sees the tool.
+say "[2] The exfiltration tool '${EXFIL_TOOL_NAME}' was gone from tools/list and refused"
+printf '    (deny-by-default gateway — the probe in ./3-defend showed the removal + refusal).\n'
+
+# 3) Show that the legitimate project was still built.
+say "[3] The legitimate project STILL built (${DELIVERABLE_DIR} in mcp-fs):"
+kc -n "$DEMO_NS" exec deploy/"$MCP_FS_DEPLOY" -- ls -la "$DELIVERABLE_DIR" 2>/dev/null | sed 's/^/    /' \
+  || printf '    (deliverable not found — did the run finish?)\n'
+
+hr
+say "  Next: ./5-reset  (clean up for another run)"
+hr
